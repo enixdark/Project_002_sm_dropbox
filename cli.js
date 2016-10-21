@@ -2,6 +2,7 @@
 
 require('./helper')
 let fs = require('fs')
+let fas = require('fs').promise
 let R = require('ramda')
 let path = require('path')
 let Rx = require('rxjs')
@@ -9,6 +10,14 @@ let Rx = require('rxjs')
 class Cli {
   constructor(message = ''){
     this._message = message
+  }
+
+  get message(){
+    return this._message
+  }
+
+  set message(newMessage){
+    this._message = newMessage
   }
 
   mkdir(files) {
@@ -79,12 +88,106 @@ class Cli {
     return fs.existsSync(file)
   }
 
-  get message(){
-    return this._message
+  removeDir(file_path, dir = __dirname){
+    try{
+      let check = fs.statSync(file_path)
+      if(check.isFile() ){
+        fs.unlink(file_path)
+        return []
+      } 
+      let lists = []
+      if(check.isDirectory() ){
+        // let files = R.filter( t => t != '',file_path.replace(__dirname,'').split('/'))
+        let filenames = fs.readdirSync(file_path)
+        if(filenames.length > 0){
+          lists.push(file_path)
+          R.forEach( file => {
+            // console.log(path.join(rootPath,file))
+            lists.push(this.removeDir(path.join(file_path,file),dir))
+          }, filenames)
+        }
+        else{
+          return [file_path]
+        }
+      }
+      return lists;
+    }
+    catch(e){
+      console.log(`no such file or directory, stat ${file_path}`)
+      return []
+    }
   }
 
-  set message(newMessage){
-    this._message = newMessage
+
+  async removeAsync(file_path, dir = __dirname){
+    let folders = await this.removeDir(file_path)
+    R.forEach(
+      async d => await fs.rmdir(d),
+      R.flatten(folders.reverse())
+    )
+    return this
+  }
+
+
+  async removeDirAsync(file_path, dir = __dirname){
+    let check = await fs.stat(file_path).catch( e => {
+      console.log(e)
+    })
+    if(check.isFile() ){
+      await fs.unlink(file_path)
+      return []
+    }
+    let promises = []
+    if(check.isDirectory() ){
+      // let files = R.filter( t => t != '',file_path.replace(__dirname,'').split('/'))
+      let filenames = await fs.readdir(file_path).catch( e => {
+        console.log(e)
+      })
+      if(filenames.length > 0){
+        promises.push(file_path)
+        R.forEach( async file => {
+          // console.log(path.join(rootPath,file))
+          promises.push(await this.removeDir(path.join(file_path,file),dir))
+        }, filenames)
+      }
+      else{
+        return [file_path]
+      }
+    }
+    return Promise.all(promises)
+
+  }
+
+  async mkdirAsync(files, dir = __dirname){
+    let files_data = (typeof files) == 'string' ? [files] : files
+    let new_path = dir
+    for(let t of files_data){
+      new_path = path.join(new_path,t)
+      await fas.mkdir(new_path).catch( e => {
+        process.stdout.write(`mkdir: cannot create directory ${new_path}: File exists \n`)
+      })
+    }
+    return this
+  }
+
+  async touchAsync(file){
+    if(file){
+      Rx.Observable.fromPromise(
+        this.touchAsync(path.join(__dirname, files_data.join('/'), file)))
+      .subscribe(
+        (s) => console.log(s),
+        (e) => console.log(e),
+        () => console.log("completed")
+      )
+    }
+  }
+
+
+  async touchAsync(file){
+    await fas.open(file, 'wx').catch( e => {
+      this._message = `${file} error ${e}`
+    })
+    return this
   }
 }
 

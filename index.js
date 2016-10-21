@@ -117,32 +117,9 @@ async function main() {
         },
         async () => {
           // process.stdout.write('completed')
-          res.end('completed')       
+          res.end('completed')
         }
       )
-
-      // var source = exists(filePath)
-      // debugger
-
-      // var subscription = source.subscribe(
-      //   (x) => console.log('onNext: %s', x) ,
-      //   (e) => { console.log('onError: %s', e),
-      //   () => console.log('onCompleted')
-      // )
-      // if(files.length > 1){
-      // }
-      // let [data, message] = ['','']
-      // try{
-      //   data = await cli.touch(file)
-      //   if(req.body){
-      //     await fs.writeFile(filePath, req.body)
-      //   }
-      //   message = `create ${req.url} success`
-      // }
-      // catch(e){
-        
-      // }
-      
     })
 
     let process_update = new CRUD(async ({req,res}) => {

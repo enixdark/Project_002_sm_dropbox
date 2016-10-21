@@ -2,7 +2,7 @@
 
 require('./helper')
 let fs = require('fs')
-let fas = require('fs').promise
+// let fas = require('fs').promise
 let R = require('ramda')
 let path = require('path')
 let Rx = require('rxjs')
@@ -122,7 +122,7 @@ class Cli {
   async removeAsync(file_path, dir = __dirname){
     let folders = await this.removeDir(file_path)
     R.forEach(
-      async d => await fs.rmdir(d),
+      async d => await fs.promise.rmdir(d),
       R.flatten(folders.reverse())
     )
     return this
@@ -130,17 +130,17 @@ class Cli {
 
 
   async removeDirAsync(file_path, dir = __dirname){
-    let check = await fs.stat(file_path).catch( e => {
+    let check = await fs.promise.stat(file_path).catch( e => {
       console.log(e)
     })
     if(check.isFile() ){
-      await fs.unlink(file_path)
+      await fs.promise.unlink(file_path)
       return []
     }
     let promises = []
     if(check.isDirectory() ){
       // let files = R.filter( t => t != '',file_path.replace(__dirname,'').split('/'))
-      let filenames = await fs.readdir(file_path).catch( e => {
+      let filenames = await fs.promise.readdir(file_path).catch( e => {
         console.log(e)
       })
       if(filenames.length > 0){
@@ -163,7 +163,7 @@ class Cli {
     let new_path = dir
     for(let t of files_data){
       new_path = path.join(new_path,t)
-      await fas.mkdir(new_path).catch( e => {
+      await fs.promise.mkdir(new_path).catch( e => {
         process.stdout.write(`mkdir: cannot create directory ${new_path}: File exists \n`)
       })
     }
@@ -184,7 +184,7 @@ class Cli {
 
 
   async touchAsync(file){
-    await fas.open(file, 'wx').catch( e => {
+    await fs.promise.open(file, 'wx').catch( e => {
       this._message = `${file} error ${e}`
     })
     return this

@@ -14,6 +14,8 @@ const sleep = require('sleep')
 const path = require('path')
 const mime = require('mime-types')
 const cli = require('./cli')
+const EventExpress = require('./event')
+const archiver = require('archiver')
 Rx.Node = require('rx-node')
 
 async function Event(callback) {
@@ -28,12 +30,18 @@ async function sendHeaders(req, res, next) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     let filePath = path.join(__dirname, 'files', req.url)
     let stat = await fs.promise.stat(filePath).catch( e => {
-      console.log(e)
+      res.send(405)
     })
-    res.writeHead(200, {
-        'Content-Length': stat.size,
-        'Content-Type': mime.contentType(path.extname(filePath))
-      })
+    if(stat){
+      req.stat = stat
+      if(stat.isFile()){
+        res.writeHead(200, {
+          'Content-Length': stat.size,
+          'Content-Type': mime.contentType(path.extname(filePath))
+        })
+      }
+      
+    }
     return next();
 }
 
@@ -53,8 +61,9 @@ async function main() {
     app.use(router)
 
     app.use(morgan('dev'))
-    app.use(bodyParser.urlencoded({ extended: false }))
+    // app.use(bodyParser.urlencoded({ extended: true }))
     app.use(bodyParser.json())
+    app.use(bodyParser.raw())
 
     app.use((req, res, next) => {
         trycatch(next, e => {
@@ -67,78 +76,97 @@ async function main() {
 
     let process_read = new Event(async ({req,res}) => {
       let filePath = path.join(__dirname, 'files', req.url)
+      // res.end('test')
       // let data = await fs.promise.readFile(filePath)
-      let pause = Rx.Observable.of(true).delay(1000);
-
-      let stream = Rx.Node.fromReadableStream(fs.createReadStream(filePath, { encoding: 'utf8' }))
-      .subscribe(
-        (v) => {
-          // console.log(v)
-          // res.writeHead(206, {
-          //   "Content-Range": "bytes " + start + "-" + end + "/" + total,
-          //   "Accept-Ranges": "bytes",
-          //   "Content-Length": chunksize,
-          //   "Content-Type": "video/mp4"
-          // })
-          res.end(v)
-          // Rx.Node.fromReadableStream(v)
-          // .subscribe(
-          //   (v) => console.log(`test 2 ${v}`),
-          //   (e) => console.log(e),
-          //   () => console.log('completed 2')
-          // )
-        },
-        (e) => res.end(e),
-        () => console.log('completed 1')
-      )
+      // let pause = Rx.Observable.of(true).delay(1000);
+      // let check = await fs.promise.stat(filePath).catch( (e) => {
+      //   res.end('file not exists')
+      // })
+      if(req.stat.isFile()){
+        let stream = Rx.Node.fromReadableStream(fs.createReadStream(filePath, { encoding: 'utf8' }))
+          .subscribe(
+            (v) => {
+            // console.log(v)
+            // res.writeHead(206, {
+            //   "Content-Range": "bytes " + start + "-" + end + "/" + total,
+            //   "Accept-Ranges": "bytes",
+            //   "Content-Length": chunksize,
+            //   "Content-Type": "video/mp4"
+            // })
+            res.end(v)
+            // Rx.Node.fromReadableStream(v)
+            // .subscribe(
+            //   (v) => console.log(`test 2 ${v}`),
+            //   (e) => console.log(e),
+            //   () => console.log('completed 2')
+            // )
+          },
+            (e) => res.end(e),
+            () => res.end('completed')
+          )
+      }
+      else if(req.stat.isDirectory()){
+        res.end(JSON.stringify("ok"))
+      }
     })
 
+
     let process_create = new Event(async ({req,res}) => {
+      // let event = new EventExpress('express', req, res)
       let filePath = path.join(__dirname, 'files', req.url)
       let files = R.filter(t => t != '',path.join('files', req.url).split('/'))
       Rx.Observable.fromPromise(fs.promise.exists(filePath))
       .subscribe(
         async (x) => {
+           let message;
            if(files.length == 2){
              let file = files.pop()
-             let data = await new cli().touchAsync(file)
-             req.pipe(await fs.promise.createWriteStream(filePath, { encoding: 'utf8' }))
-             res.end(data)
+             message = await new cli().touchAsync(file)
            }
            else{
              let file = files.pop()
-             let message = await (await new cli().mkdirAsync(files)).touchAsync(filePath)
-             if(req.body){
-               debugger
-               req.pipe(await fs.promise.createWriteStream(filePath, { encoding: 'utf8' }))
-               // await fs.promise.writeFile(filePath, JSON.stringify(req.body))
-             }
-             res.end(message.message)
+             message = await (await new cli().mkdirAsync(files)).touchAsync(filePath)
            }
-           // return message
+           await fs.truncate(filePath, 0)
+           req.pipe(fs.createWriteStream(filePath))
+           res.send(200)
+           res.end('\n')
         } ,
         async (e) => {
           // process.stdout.write(`file ${files.pop()} exists`)
+          res.send(405)
           res.end(`file ${files.pop()} exists`)
+
         },
         async () => {
-          // process.stdout.write('completed')
-          res.end('completed')
+          // res.end('\n')
         }
       )
+      
     })
-
     let process_update = new Event(async ({req,res}) => {
       let filePath = path.join(__dirname, 'files', req.url)
-      let data = await fs.promise.writeFile(filePath, req.body)
-      res.end()
+      Rx.Observable.fromPromise(fs.promise.exists(filePath))
+      .subscribe(
+        async (x) => {
+          res.send(405)
+        } ,
+        async (e) => {
+          await fs.truncate(filePath, 0)
+          req.pipe(fs.createWriteStream(filePath))
+          res.send(200)
+          res.end('\n')
+        },
+        async () => {
+          res.end('\n')
+        }
+      )
     })
 
     let process_remove = new Event(async ({req, res}) => {
       let filePath = path.join(__dirname, 'files', req.url)
       // let data = await fs.promise.unlink(filePath)
-      // debugger
-      console.log(await new cli().removeAsync(filePath))
+      await new cli().removeAsync(filePath)
       res.end()
     })
 

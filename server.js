@@ -1,4 +1,4 @@
-#!/usr/bin/env babel-node
+// #!/usr/bin/env babel-node
 
 require('./helper')
 // let Promise = require("bluebird");
@@ -15,35 +15,65 @@ const path = require('path')
 const mime = require('mime-types')
 const cli = require('./cli')
 const EventExpress = require('./event')
+const handler = require('./crud')
 const archiver = require('archiver')
+const nodeify = require('bluebird-nodeify')
+const nssocket = require('nssocket')
+const chokidar = require('chokidar')
+const argv = require('yargs').argv
+const https = require('https')
 Rx.Node = require('rx-node')
 
-async function Event(callback) {
-    return (req,res)  => Rx.Subscriber.create(
-      callback({req,res}),
-      (err) =>  console.log('Error: ' + err),
-      () => console.log('Completed')
-    ).next({req,res})
-}
+const NODE_ENV = process.env.NODE_ENV
+const PORT = process.env.PORT || 8000
+const ROOT_DIR = process.env.ROOT_DIR || argv.dir || process.cwd()
+const SOCKER_PORT = process.env.SOCKER_PORT || 8001
+let socket, app = undefined
+let clients = {}
 
 async function sendHeaders(req, res, next) {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    let filePath = path.join(__dirname, 'files', req.url)
-    let stat = await fs.promise.stat(filePath).catch( e => {
-      res.send(405)
-    })
-    if(stat){
-      req.stat = stat
-      if(stat.isFile()){
-        res.writeHead(200, {
-          'Content-Length': stat.size,
-          'Content-Type': mime.contentType(path.extname(filePath))
-        })
-      }
-      
+    if(req.stat.isFile()){
+      res.writeHead(200, {
+        'Content-Length': req.stat.size,
+        'Content-Type': mime.contentType(path.extname(req.filePath))
+      })
+    }
+    else{
+      req.body = JSON.stringify(await fs.promise.readdir(req.filePath))
+      // console.log(req.body)
+      res.writeHead(200,{
+        // 'Content-Length': req.body.length,
+        'Content-Type': 'application/x-gtar'
+      })
     }
     return next();
 }
+
+
+async function setFileMeta(req, res, next){
+  req.socket = socket ? socket : { send: (event,data) => undefined }
+  req.rootdir = path.resolve(path.join(ROOT_DIR))
+  req.filePath = path.resolve(path.join(req.rootdir, 'files', req.url))
+  if(req.filePath.indexOf(ROOT_DIR) !== 0){
+    res.status(400).send('Invalid path')
+    return
+  }
+  if(req.method !== 'PUT'){
+    req.stat = await fs.promise.stat(req.filePath).catch( e => {
+      res.sendStatus(405)
+    })
+    return req.stat ? next() : undefined
+  }
+  return next()
+  
+}
+
+async function sendPayload(req,res, next){
+
+}
+
+
 
 
 async function main() {
@@ -52,15 +82,13 @@ async function main() {
     console.log('Starting server...')
     // debugger
     // Your implementation here
-    let app = express()
+    app = express()
     let router = PromiseRouter()
-    let port = 8000
-
-
     // Object.assign(app, router)     // Inherit methods
     app.use(router)
-
-    app.use(morgan('dev'))
+    if(NODE_ENV == 'development'){
+      app.use(morgan('dev'))
+    }
     // app.use(bodyParser.urlencoded({ extended: true }))
     app.use(bodyParser.json())
     app.use(bodyParser.raw())
@@ -74,112 +102,63 @@ async function main() {
     })
 
 
-    let process_read = new Event(async ({req,res}) => {
-      let filePath = path.join(__dirname, 'files', req.url)
-      // res.end('test')
-      // let data = await fs.promise.readFile(filePath)
-      // let pause = Rx.Observable.of(true).delay(1000);
-      // let check = await fs.promise.stat(filePath).catch( (e) => {
-      //   res.end('file not exists')
-      // })
-      if(req.stat.isFile()){
-        let stream = Rx.Node.fromReadableStream(fs.createReadStream(filePath, { encoding: 'utf8' }))
-          .subscribe(
-            (v) => {
-            // console.log(v)
-            // res.writeHead(206, {
-            //   "Content-Range": "bytes " + start + "-" + end + "/" + total,
-            //   "Accept-Ranges": "bytes",
-            //   "Content-Length": chunksize,
-            //   "Content-Type": "video/mp4"
-            // })
-            res.end(v)
-            // Rx.Node.fromReadableStream(v)
-            // .subscribe(
-            //   (v) => console.log(`test 2 ${v}`),
-            //   (e) => console.log(e),
-            //   () => console.log('completed 2')
-            // )
-          },
-            (e) => res.end(e),
-            () => res.end('completed')
-          )
-      }
-      else if(req.stat.isDirectory()){
-        res.end(JSON.stringify("ok"))
-      }
-    })
+    
 
-
-    let process_create = new Event(async ({req,res}) => {
-      // let event = new EventExpress('express', req, res)
-      let filePath = path.join(__dirname, 'files', req.url)
-      let files = R.filter(t => t != '',path.join('files', req.url).split('/'))
-      Rx.Observable.fromPromise(fs.promise.exists(filePath))
-      .subscribe(
-        async (x) => {
-           let message;
-           if(files.length == 2){
-             let file = files.pop()
-             message = await new cli().touchAsync(file)
-           }
-           else{
-             let file = files.pop()
-             message = await (await new cli().mkdirAsync(files)).touchAsync(filePath)
-           }
-           await fs.truncate(filePath, 0)
-           req.pipe(fs.createWriteStream(filePath))
-           res.send(200)
-           res.end('\n')
-        } ,
-        async (e) => {
-          // process.stdout.write(`file ${files.pop()} exists`)
-          res.send(405)
-          res.end(`file ${files.pop()} exists`)
-
-        },
-        async () => {
-          // res.end('\n')
-        }
-      )
-      
-    })
-    let process_update = new Event(async ({req,res}) => {
-      let filePath = path.join(__dirname, 'files', req.url)
-      Rx.Observable.fromPromise(fs.promise.exists(filePath))
-      .subscribe(
-        async (x) => {
-          res.send(405)
-        } ,
-        async (e) => {
-          await fs.truncate(filePath, 0)
-          req.pipe(fs.createWriteStream(filePath))
-          res.send(200)
-          res.end('\n')
-        },
-        async () => {
-          res.end('\n')
-        }
-      )
-    })
-
-    let process_remove = new Event(async ({req, res}) => {
-      let filePath = path.join(__dirname, 'files', req.url)
-      // let data = await fs.promise.unlink(filePath)
-      await new cli().removeAsync(filePath)
-      res.end()
-    })
-
-    app.head('*', sendHeaders, (req, res) => res.end())
-    app.get('*', sendHeaders, await process_read)
-    app.put('*', await process_create)
-    app.post('*', await process_update)
-    app.delete('*', await process_remove)
+    app.head('*', setFileMeta, sendHeaders, (req, res) => res.end())
+    app.get('*', setFileMeta, sendHeaders, await handler.process_read)
+    app.put('*', setFileMeta, await handler.process_create)
+    app.post('*', setFileMeta, await handler.process_update)
+    app.delete('*', setFileMeta, await handler.process_delete )
     // debugger
     // Promise.promisifyAll(app.prototype)
     // sleep.sleep(2)
-    await app.listen(port)
-    console.log(`LISTENING @ http://127.0.0.1:${port}`)
+    await app.listen(PORT)
+    https.createServer({
+      key: fs.readFileSync('./ssl/server_key.pem'),
+      cert: fs.readFileSync('./ssl/server_cert.pem')
+    }, app).listen(8443)
+
+    let server = nssocket.createServer( st => {
+      socket = st
+      st.data(['connect'], (value) => {
+        clients = Object.assign(clients, value)
+        console.log(JSON.stringify(clients))
+      })
+    })
+    server.listen(SOCKER_PORT, () => {
+      console.log('opened server on', server.address())
+    })
+
+    
+    
+    
+
+    console.log(`Server LISTENING @ http://127.0.0.1:${PORT}`)
+    // console.log(`Socket LISTENING @ http://127.0.0.1:${SOCKER_PORT}`)
+    // 
+    chokidar.watch(`${ROOT_DIR}/files`, {
+      interval: 100,
+      ignored: /([\/\\]\.|node_modules)/,
+      persistent: true,
+      ignoreInitial: true,
+    })
+    .on('all', (event, path) => {
+      console.log(`Event: ${event} Path: ${path}`)
+      R.forEach( (name) => {
+        console.log(name)
+        socket.send(['refresh', name])
+      }, Object.keys(clients))
+    })
+    // .on('add', path => console.log(`File ${path} has been added`))
+    // .on('change', path => console.log(`File ${path} has been changed`))
+    // .on('unlink', path => console.log(`File ${path} has been removed`))
+    // .on('addDir', path => console.log(`Directory ${path} has been added`))
+    // .on('unlinkDir', path => console.log(`Directory ${path} has been removed`))
+    // .on('error', error => console.log(`Watcher error: ${error}`))
+    // .on('ready', () => console.log('Initial scan complete. Ready for changes'))
+    // .on('raw', (event, path, details) => {
+    //   console.log('Raw event info:', event, path, details);
+    // })
 }
 
 main()

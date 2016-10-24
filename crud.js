@@ -17,10 +17,10 @@ async function Event(callback) {
     ).next({req,res})
 }
 
-function payload(action, path, type, updated = Date.parse(new Date()) ){
+function payload(action, pathFile, type, updated = Date.parse(new Date()) ){
   return JSON.stringify({
               "action": action,
-              "path": path,
+              "path": pathFile,
               "type": type,
               "updated":updated
         })
@@ -41,7 +41,7 @@ let process_read = new Event(async ({req,res}) => {
             // })
 
             res.end(v)
-            req.socket.send(['event'], payload('read', req.path, 'file'))
+            req.socket.send(['event'], payload('read', path.resolve(req.path), 'file'))
             // Rx.Node.fromReadableStream(v)
             // .subscribe(
             //   (v) => console.log(`test 2 ${v}`),
@@ -65,7 +65,7 @@ let process_read = new Event(async ({req,res}) => {
       archive.finalize()
     }
     else{
-      req.socket.send('event', payload('read', req.path, 'dir'))
+      req.socket.send('event', payload('read', path.resolve(req.path), 'dir'))
       res.end(req.body)
     }
   }
@@ -74,19 +74,23 @@ let process_read = new Event(async ({req,res}) => {
 
 let process_create = new Event(async ({req,res}) => {
       // let event = new EventExpress('express', req, res)
-      let files = R.filter(t => t != '',path.join('files', req.url).split('/'))
-
+      
+      let list_files = path.join('files', req.url.split('?')[0]).split('/')
+      
       Rx.Observable.fromPromise(fs.promise.exists(req.filePath))
       .subscribe(
         async (x) => {
          let message;
+         let files = R.clone(list_files)
          if(files.length == 2){
            let file = files.pop()
            message = await new cli().touchAsync(req.filePath).catch( e => {})
-           req.socket.send('event', payload('write', req.path, 'file'))
+           req.socket.send('event', payload('write', path.resolve(req.path), 'file'))
          }
          else{
+           debugger
            let file = files.pop()
+           console.log(req.filePath)
            message = await (await new cli().mkdirAsync(files)).touchAsync(req.filePath).catch( e => {})
            R.reduce( async (root, next)  => {
               let new_path = path.join(await root,next)
@@ -95,18 +99,19 @@ let process_create = new Event(async ({req,res}) => {
               })
               return new_path
            }, req.rootdir, files)
-           req.socket.send('event', payload('write', req.filePath, 'file'))
+           req.socket.send('event', payload('write', req.path, 'file'))
          }
-         await fs.truncate(req.filePath, 0)
-         req.pipe(fs.createWriteStream(req.filePath))
+         if(list_files.pop() != ''){
+           await fs.truncate(req.filePath, 0)
+           req.pipe(fs.createWriteStream(req.filePath))
+         }
          res.sendStatus(200)
          res.end('\n')
        } ,
        async (e) => {
           // process.stdout.write(`file ${files.pop()} exists`)
           res.sendStatus(405)
-          res.end(`file ${files.pop()} exists`)
-
+          // res.end(`file ${files.pop()} exists`)
         },
         async () => {
           // res.end('\n')
@@ -123,7 +128,7 @@ let process_update = new Event(async ({req,res}) => {
     async (e) => {
       await fs.truncate(req.filePath, 0)
       req.pipe(fs.createWriteStream(req.filePath))
-      req.socket.send('event', payload('write', req.filePath, 'file'))
+      req.socket.send('event', payload('write', req.path, 'file'))
       res.sendStatus(200)
       res.end('\n')
     },
@@ -135,12 +140,13 @@ let process_update = new Event(async ({req,res}) => {
 
 let process_delete = new Event(async ({req, res}) => {
       // let data = await fs.promise.unlink(req.filePath)
-      await new cli().removeAsync(req.filePath).catch(e => {})
+      debugger
+      await new cli().removeAsync(req.path, path.join(req.rootdir, 'files')).catch(e => {})
       if(req.stat.isFile()){
-        req.socket.send('event', payload('delete', req.filePath, 'file'))
+        req.socket.send('event', payload('delete', req.path, 'file'))
       }
       else if(req.stat.isDirectory()){
-        req.socket.send('event', payload('delete', req.filePath, 'dir'))
+        req.socket.send('event', payload('delete', req.path, 'dir'))
       }
       res.end()
     })

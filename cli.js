@@ -6,7 +6,6 @@ let fs = require('fs')
 let R = require('ramda')
 let path = require('path')
 let Rx = require('rxjs')
-
 class Cli {
   constructor(message = ''){
     this._message = message
@@ -120,7 +119,8 @@ class Cli {
 
 
   async removeAsync(file_path, dir = __dirname){
-    let folders = await this.removeDir(file_path)
+    let folders = await this.removeDirAsync(file_path, dir)
+    // console.log(folders)
     R.forEach(
       async d => await fs.promise.rmdir(d),
       R.flatten(folders.reverse())
@@ -130,32 +130,33 @@ class Cli {
 
 
   async removeDirAsync(file_path, dir = __dirname){
-    let check = await fs.promise.stat(file_path).catch( e => {
-      console.log(e)
+    // console.log(path.join(dir,file_path))
+
+    let check = await fs.promise.stat(path.join(dir,file_path)).catch( e => {
+      // console.log(e)
     })
-    if(check.isFile() ){
-      await fs.promise.unlink(file_path)
+
+    if(check.isFile()){
+      await fs.promise.unlink(path.join(dir,file_path))
       return []
     }
     let promises = []
     if(check.isDirectory() ){
       // let files = R.filter( t => t != '',file_path.replace(__dirname,'').split('/'))
-      let filenames = await fs.promise.readdir(file_path).catch( e => {
-        console.log(e)
+      let filenames = await fs.promise.readdir(path.join(dir,file_path)).catch( e => {
+        // console.log(e)
       })
       if(filenames.length > 0){
-        promises.push(file_path)
-        R.forEach( async file => {
-          // console.log(path.join(rootPath,file))
-          promises.push(await this.removeDir(path.join(file_path,file),dir))
+        promises.push(path.join(dir,file_path))
+        R.forEach( file => {
+          promises.push(this.removeDirAsync(path.join(file_path,file),dir))
         }, filenames)
       }
-      else{
-        return [file_path]
+      else{ 
+        return [path.join(dir,file_path)]
       }
     }
-    return Promise.all(promises)
-
+    return await Promise.all(promises)
   }
 
   async mkdirAsync(files, dir = __dirname){

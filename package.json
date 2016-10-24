@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "build": "./node_modules/babel-cli/bin/babel.js server.js --out-file src/server.js",
-    "start": "./node_modules/.bin/vertx run src/server.js"
+    "vertx": "./node_modules/.bin/vertx run src/server.js",
+    "server": "babel-node server.js",
+    "client": "babel-node client.js"
   },
   "repository": {
     "type": "git",
@@ -29,6 +31,7 @@
     "chokidar": "^1.6.1",
     "express": "^4.14.0",
     "express-promise-router": "^1.1.1",
+    "express-session": "^1.14.1",
     "faker": "^3.1.0",
     "mime-types": "^2.1.12",
     "morgan": "^1.7.0",
@@ -37,6 +40,7 @@
     "npm-run-all": "^3.1.0",
     "nssocket": "^0.6.0",
     "ramda": "^0.22.1",
+    "rand-token": "^0.2.1",
     "rx": "^4.1.0",
     "rx-node": "^1.0.2",
     "rxjs": "^5.0.0-rc.1",

@@ -22,6 +22,7 @@ const nssocket = require('nssocket')
 const chokidar = require('chokidar')
 const argv = require('yargs').argv
 const https = require('https')
+const request = require('request')
 Rx.Node = require('rx-node')
 
 const NODE_ENV = process.env.NODE_ENV
@@ -30,7 +31,6 @@ const ROOT_DIR = process.env.ROOT_DIR || argv.dir || process.cwd()
 const SOCKER_PORT = process.env.SOCKER_PORT || 8001
 let socket, app = undefined
 let clients = {}
-
 async function sendHeaders(req, res, next) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     if(req.stat.isFile()){
@@ -52,9 +52,14 @@ async function sendHeaders(req, res, next) {
 
 
 async function setFileMeta(req, res, next){
-  req.socket = socket ? socket : { send: (event,data) => undefined }
+  try{
+    req.socket = clients[req.query.token].socket
+  }
+  catch(e){
+    req.socket = { send: (event,data) => undefined }
+  }
   req.rootdir = path.resolve(path.join(ROOT_DIR))
-  req.filePath = path.resolve(path.join(req.rootdir, 'files', req.url))
+  req.filePath = path.resolve(path.join(req.rootdir, 'files', req.url.split('?')[0]))
   if(req.filePath.indexOf(ROOT_DIR) !== 0){
     res.status(400).send('Invalid path')
     return
@@ -119,19 +124,25 @@ async function main() {
     }, app).listen(8443)
 
     let server = nssocket.createServer( st => {
-      socket = st
+      // if(!socket)
+      //   socket = st
       st.data(['connect'], (value) => {
-        clients = Object.assign(clients, value)
-        console.log(JSON.stringify(clients))
+        clients = Object.assign(clients, {
+          [value.token]: {
+          socket: st,
+          name: value.name,
+          path: value.path
+        }})
       })
+
+      // st.data(['add'], (value) => {
+      //   request.put(`http://127.0.0.1:${PORT}` + value.path + `?token=${value.token}`)
+      // })
     })
     server.listen(SOCKER_PORT, () => {
       console.log('opened server on', server.address())
     })
 
-    
-    
-    
 
     console.log(`Server LISTENING @ http://127.0.0.1:${PORT}`)
     // console.log(`Socket LISTENING @ http://127.0.0.1:${SOCKER_PORT}`)
@@ -142,12 +153,16 @@ async function main() {
       persistent: true,
       ignoreInitial: true,
     })
-    .on('all', (event, path) => {
-      console.log(`Event: ${event} Path: ${path}`)
-      R.forEach( (name) => {
-        console.log(name)
-        socket.send(['refresh', name])
-      }, Object.keys(clients))
+    .on('all', (event, event_path) => {
+      console.log(`Event: ${event} Path: ${event_path}`)
+      if(event == 'unlink' || event == 'unlinkDir')
+        R.forEach( (token) => {
+          clients[token].socket.send(['delete'], event_path.replace(path.join(ROOT_DIR,'files'),''))
+        }, Object.keys(clients))
+      if(event == 'add' || event == 'change' || event == 'addDir')
+        R.forEach( (token) => {
+          clients[token].socket.send(['refresh'])
+        }, Object.keys(clients))
     })
     // .on('add', path => console.log(`File ${path} has been added`))
     // .on('change', path => console.log(`File ${path} has been changed`))
